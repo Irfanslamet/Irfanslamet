@@ -56,15 +56,12 @@ I believe great software is not only about writing code, but also about understa
 - Mobile applications using Kotlin
 - Practical digital solutions that solve real-world problems
 
-## 📊 GitHub Statistics
+## 📊 Latest Project Statistics
 
 <div align="center">
-  <img src="https://github-readme-stats.vercel.app/api?username=Irfanslamet&show_icons=true&theme=tokyonight&hide_border=true&count_private=true" height="170" alt="Irfan's GitHub statistics" />
-  <img src="https://github-readme-stats.vercel.app/api/top-langs/?username=Irfanslamet&layout=compact&theme=tokyonight&hide_border=true" height="170" alt="Irfan's most used languages" />
-</div>
-
-<div align="center">
-  <img src="https://github-readme-streak-stats.herokuapp.com/?user=Irfanslamet&theme=tokyonight&hide_border=true" alt="Irfan's GitHub contribution streak" />
+  <a href="https://github.com/Irfanslamet/GBIweb">
+    <img src="./assets/latest-project-stats.svg" alt="Latest project commit and merged pull request statistics" />
+  </a>
 </div>
 
 ## 🤝 Let's Connect
