@@ -17,44 +17,31 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const fs = require('fs');
             const owner = context.repo.owner;
             const profileRepo = context.repo.repo;
             const now = new Date();
             const since = new Date(now);
             since.setUTCFullYear(since.getUTCFullYear() - 1);
+            const sinceDate = since.toISOString().slice(0, 10);
 
-            const repos = await github.paginate(github.rest.repos.listForAuthenticatedUser, {
-              affiliation: 'owner,collaborator,organization_member',
-              per_page: 100,
-              visibility: 'all'
-            });
+            const commitSearch = await github.paginate(github.rest.search.commits, {
+              q: `author:${owner} committer-date:>=${sinceDate}`,
+              per_page: 100
+            }).catch(() => []);
 
-            let commitCount = 0;
+            const mergedSearch = await github.paginate(github.rest.search.issuesAndPullRequests, {
+              q: `author:${owner} is:pr is:merged merged:>=${sinceDate}`,
+              per_page: 100
+            }).catch(() => []);
+
             const dailyActivity = new Map();
-
-            for (const repo of repos) {
-              const commits = await github.paginate(github.rest.repos.listCommits, {
-                owner: repo.owner.login,
-                repo: repo.name,
-                author: owner,
-                since: since.toISOString(),
-                per_page: 100
-              }).catch(() => []);
-
-              for (const commit of commits) {
-                commitCount++;
-                const date = commit.commit.author?.date || commit.commit.committer?.date;
-                if (!date) continue;
+            for (const commit of commitSearch) {
+              const date = commit.commit?.committer?.date || commit.commit?.author?.date;
+              if (date) {
                 const key = date.slice(0, 10);
                 dailyActivity.set(key, (dailyActivity.get(key) || 0) + 1);
               }
             }
-
-            const mergedSearch = await github.paginate(github.rest.search.issuesAndPullRequests, {
-              q: `author:${owner} is:pr is:merged merged:>=${since.toISOString().slice(0, 10)}`,
-              per_page: 100
-            }).catch(() => []);
 
             let fixMergedCount = 0;
             for (const pr of mergedSearch) {
@@ -75,7 +62,6 @@ jobs:
               .replace(/>/g, '&gt;')
               .replace(/"/g, '&quot;');
 
-            const weekdays = ['Mon', 'Wed', 'Fri'];
             const dayMs = 24 * 60 * 60 * 1000;
             const start = new Date(now);
             start.setUTCHours(0, 0, 0, 0);
@@ -93,9 +79,6 @@ jobs:
             }
 
             const heatCells = [];
-            let maxActivity = 1;
-            for (const count of dailyActivity.values()) maxActivity = Math.max(maxActivity, count);
-
             for (let week = 0; week < 53; week++) {
               for (let dow = 0; dow < 7; dow++) {
                 const date = new Date(start.getTime() + (week * 7 + dow) * dayMs);
@@ -115,7 +98,7 @@ jobs:
               <text x="36" y="44" fill="#f0f6fc" font-family="Arial, sans-serif" font-size="22" font-weight="700">GitHub-wide activity</text>
               <text x="684" y="44" fill="#8b949e" font-family="Arial, sans-serif" font-size="12" text-anchor="end">Past 12 months</text>
               <line x1="36" y1="64" x2="684" y2="64" stroke="#30363d"/>
-              <text x="150" y="108" fill="#58a6ff" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">${escape(commitCount)}</text>
+              <text x="150" y="108" fill="#58a6ff" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">${escape(commitSearch.length)}</text>
               <text x="150" y="130" fill="#c9d1d9" font-family="Arial, sans-serif" font-size="13" text-anchor="middle">COMMITS</text>
               <text x="360" y="108" fill="#3fb950" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">${escape(mergedSearch.length)}</text>
               <text x="360" y="130" fill="#c9d1d9" font-family="Arial, sans-serif" font-size="13" text-anchor="middle">MERGED PRs</text>
