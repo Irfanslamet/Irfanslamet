@@ -56,11 +56,11 @@ I believe great software is not only about writing code, but also about understa
 - Mobile applications using Kotlin
 - Practical digital solutions that solve real-world problems
 
-## 📊 Latest Project Statistics
+## 📊 GitHub Activity
 
 <div align="center">
-  <a href="https://github.com/Irfanslamet/GBIweb">
-    <img src="./assets/latest-project-stats.svg" alt="Latest project commit and merged pull request statistics" />
+  <a href="https://github.com/Irfanslamet">
+    <img src="./assets/latest-project-stats.svg" alt="GitHub-wide commits, merged pull requests, fix merges, and 12-month contribution activity" />
   </a>
 </div>
 
