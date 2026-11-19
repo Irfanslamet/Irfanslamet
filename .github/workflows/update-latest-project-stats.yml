@@ -1,4 +1,4 @@
-name: Update latest project statistics
+name: Update global activity statistics
 
 on:
   schedule:
@@ -12,7 +12,7 @@ jobs:
   update-statistics:
     runs-on: ubuntu-latest
     steps:
-      - name: Update statistics card
+      - name: Generate activity statistics
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -20,45 +20,114 @@ jobs:
             const fs = require('fs');
             const owner = context.repo.owner;
             const profileRepo = context.repo.repo;
-            const repos = await github.paginate(github.rest.repos.listForUser, {
-              username: owner,
-              per_page: 100,
-              sort: 'pushed'
-            });
-            const latest = repos
-              .filter(repo => !repo.fork && repo.name !== profileRepo)
-              .sort((a, b) => new Date(b.pushed_at) - new Date(a.pushed_at))[0];
+            const now = new Date();
+            const since = new Date(now);
+            since.setUTCFullYear(since.getUTCFullYear() - 1);
 
-            if (!latest) {
-              core.setFailed('No latest project was found.');
-              return;
+            const repos = await github.paginate(github.rest.repos.listForAuthenticatedUser, {
+              affiliation: 'owner,collaborator,organization_member',
+              per_page: 100,
+              visibility: 'all'
+            });
+
+            let commitCount = 0;
+            const dailyActivity = new Map();
+
+            for (const repo of repos) {
+              const commits = await github.paginate(github.rest.repos.listCommits, {
+                owner: repo.owner.login,
+                repo: repo.name,
+                author: owner,
+                since: since.toISOString(),
+                per_page: 100
+              }).catch(() => []);
+
+              for (const commit of commits) {
+                commitCount++;
+                const date = commit.commit.author?.date || commit.commit.committer?.date;
+                if (!date) continue;
+                const key = date.slice(0, 10);
+                dailyActivity.set(key, (dailyActivity.get(key) || 0) + 1);
+              }
             }
 
-            const commits = await github.paginate(github.rest.repos.listCommits, {
-              owner,
-              repo: latest.name,
-              author: owner,
+            const mergedSearch = await github.paginate(github.rest.search.issuesAndPullRequests, {
+              q: `author:${owner} is:pr is:merged merged:>=${since.toISOString().slice(0, 10)}`,
               per_page: 100
-            });
-            const mergedPrs = await github.rest.search.issuesAndPullRequests({
-              q: `repo:${owner}/${latest.name} is:pr is:merged author:${owner}`,
-              per_page: 1
-            });
+            }).catch(() => []);
+
+            let fixMergedCount = 0;
+            for (const pr of mergedSearch) {
+              const title = (pr.title || '').toLowerCase();
+              if (/\bfix\b|\bfix:|\bbugfix\b|\bhotfix\b|^fix(?:\s|\(|$)/.test(title)) {
+                fixMergedCount++;
+              }
+              const date = pr.closed_at || pr.updated_at;
+              if (date) {
+                const key = date.slice(0, 10);
+                dailyActivity.set(key, (dailyActivity.get(key) || 0) + 1);
+              }
+            }
+
             const escape = value => String(value)
               .replace(/&/g, '&amp;')
               .replace(/</g, '&lt;')
               .replace(/>/g, '&gt;')
               .replace(/"/g, '&quot;');
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="180" viewBox="0 0 720 180">
-              <rect width="720" height="180" rx="16" fill="#0f172a"/>
-              <text x="36" y="42" fill="#94a3b8" font-family="Arial, sans-serif" font-size="16">LATEST PROJECT</text>
-              <text x="36" y="78" fill="#f8fafc" font-family="Arial, sans-serif" font-size="28" font-weight="700">${escape(latest.name)}</text>
-              <line x1="36" y1="100" x2="684" y2="100" stroke="#334155"/>
-              <text x="150" y="140" fill="#60a5fa" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">${commits.length}</text>
-              <text x="150" y="162" fill="#cbd5e1" font-family="Arial, sans-serif" font-size="14" text-anchor="middle">COMMITS</text>
-              <text x="570" y="140" fill="#34d399" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">${mergedPrs.data.total_count}</text>
-              <text x="570" y="162" fill="#cbd5e1" font-family="Arial, sans-serif" font-size="14" text-anchor="middle">MERGED PRs</text>
+
+            const weekdays = ['Mon', 'Wed', 'Fri'];
+            const dayMs = 24 * 60 * 60 * 1000;
+            const start = new Date(now);
+            start.setUTCHours(0, 0, 0, 0);
+            start.setUTCDate(start.getUTCDate() - 364);
+
+            const monthLabels = [];
+            let lastMonth = -1;
+            for (let week = 0; week < 53; week++) {
+              const date = new Date(start.getTime() + week * 7 * dayMs);
+              const month = date.getUTCMonth();
+              if (month !== lastMonth) {
+                monthLabels.push({ week, label: date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }) });
+                lastMonth = month;
+              }
+            }
+
+            const heatCells = [];
+            let maxActivity = 1;
+            for (const count of dailyActivity.values()) maxActivity = Math.max(maxActivity, count);
+
+            for (let week = 0; week < 53; week++) {
+              for (let dow = 0; dow < 7; dow++) {
+                const date = new Date(start.getTime() + (week * 7 + dow) * dayMs);
+                if (date > now) continue;
+                const key = date.toISOString().slice(0, 10);
+                const count = dailyActivity.get(key) || 0;
+                const level = count === 0 ? 0 : count === 1 ? 1 : count <= 3 ? 2 : count <= 6 ? 3 : 4;
+                const x = 44 + week * 12;
+                const y = 222 + dow * 12;
+                heatCells.push(`<rect x="${x}" y="${y}" width="9" height="9" rx="2" fill="${['#161b22', '#0e4429', '#006d32', '#26a641', '#39d353'][level]}"/>`);
+              }
+            }
+
+            const months = monthLabels.map(m => `<text x="${44 + m.week * 12}" y="210" fill="#8b949e" font-family="Arial, sans-serif" font-size="10">${m.label}</text>`).join('');
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="330" viewBox="0 0 720 330">
+              <rect width="720" height="330" rx="16" fill="#0d1117" stroke="#30363d"/>
+              <text x="36" y="44" fill="#f0f6fc" font-family="Arial, sans-serif" font-size="22" font-weight="700">GitHub-wide activity</text>
+              <text x="684" y="44" fill="#8b949e" font-family="Arial, sans-serif" font-size="12" text-anchor="end">Past 12 months</text>
+              <line x1="36" y1="64" x2="684" y2="64" stroke="#30363d"/>
+              <text x="150" y="108" fill="#58a6ff" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">${escape(commitCount)}</text>
+              <text x="150" y="130" fill="#c9d1d9" font-family="Arial, sans-serif" font-size="13" text-anchor="middle">COMMITS</text>
+              <text x="360" y="108" fill="#3fb950" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">${escape(mergedSearch.length)}</text>
+              <text x="360" y="130" fill="#c9d1d9" font-family="Arial, sans-serif" font-size="13" text-anchor="middle">MERGED PRs</text>
+              <text x="570" y="108" fill="#d29922" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">${escape(fixMergedCount)}</text>
+              <text x="570" y="130" fill="#c9d1d9" font-family="Arial, sans-serif" font-size="13" text-anchor="middle">FIX MERGED</text>
+              ${months}
+              ${heatCells.join('')}
+              <text x="44" y="310" fill="#8b949e" font-family="Arial, sans-serif" font-size="11">Less</text>
+              <rect x="76" y="301" width="9" height="9" rx="2" fill="#161b22"/><rect x="88" y="301" width="9" height="9" rx="2" fill="#0e4429"/><rect x="100" y="301" width="9" height="9" rx="2" fill="#006d32"/><rect x="112" y="301" width="9" height="9" rx="2" fill="#26a641"/><rect x="124" y="301" width="9" height="9" rx="2" fill="#39d353"/>
+              <text x="138" y="310" fill="#8b949e" font-family="Arial, sans-serif" font-size="11">More</text>
             </svg>`;
+
             const path = 'assets/latest-project-stats.svg';
             let sha;
             try {
@@ -71,7 +140,7 @@ jobs:
               owner,
               repo: profileRepo,
               path,
-              message: `chore: update latest project statistics for ${latest.name}`,
+              message: 'chore: update global GitHub activity statistics',
               content: Buffer.from(svg).toString('base64'),
               branch: context.ref.replace('refs/heads/', ''),
               ...(sha ? { sha } : {})
