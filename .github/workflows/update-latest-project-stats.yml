@@ -1,0 +1,78 @@
+name: Update latest project statistics
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-statistics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update statistics card
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const profileRepo = context.repo.repo;
+            const repos = await github.paginate(github.rest.repos.listForUser, {
+              username: owner,
+              per_page: 100,
+              sort: 'pushed'
+            });
+            const latest = repos
+              .filter(repo => !repo.fork && repo.name !== profileRepo)
+              .sort((a, b) => new Date(b.pushed_at) - new Date(a.pushed_at))[0];
+
+            if (!latest) {
+              core.setFailed('No latest project was found.');
+              return;
+            }
+
+            const commits = await github.paginate(github.rest.repos.listCommits, {
+              owner,
+              repo: latest.name,
+              author: owner,
+              per_page: 100
+            });
+            const mergedPrs = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${owner}/${latest.name} is:pr is:merged author:${owner}`,
+              per_page: 1
+            });
+            const escape = value => String(value)
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;');
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="180" viewBox="0 0 720 180">
+              <rect width="720" height="180" rx="16" fill="#0f172a"/>
+              <text x="36" y="42" fill="#94a3b8" font-family="Arial, sans-serif" font-size="16">LATEST PROJECT</text>
+              <text x="36" y="78" fill="#f8fafc" font-family="Arial, sans-serif" font-size="28" font-weight="700">${escape(latest.name)}</text>
+              <line x1="36" y1="100" x2="684" y2="100" stroke="#334155"/>
+              <text x="150" y="140" fill="#60a5fa" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">${commits.length}</text>
+              <text x="150" y="162" fill="#cbd5e1" font-family="Arial, sans-serif" font-size="14" text-anchor="middle">COMMITS</text>
+              <text x="570" y="140" fill="#34d399" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">${mergedPrs.data.total_count}</text>
+              <text x="570" y="162" fill="#cbd5e1" font-family="Arial, sans-serif" font-size="14" text-anchor="middle">MERGED PRs</text>
+            </svg>`;
+            const path = 'assets/latest-project-stats.svg';
+            let sha;
+            try {
+              const existing = await github.rest.repos.getContent({ owner, repo: profileRepo, path });
+              sha = existing.data.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.repos.createOrUpdateFileContents({
+              owner,
+              repo: profileRepo,
+              path,
+              message: `chore: update latest project statistics for ${latest.name}`,
+              content: Buffer.from(svg).toString('base64'),
+              branch: context.ref.replace('refs/heads/', ''),
+              ...(sha ? { sha } : {})
+            });
